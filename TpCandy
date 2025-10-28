@@ -1,0 +1,225 @@
+-- Mega Mansion Tycoon Auto Tween Candies Hub using Rayfield UI
+-- Features: Toggleable Auto Tween to Candies (scans folder or entire workspace)
+-- Tweens smoothly 10 studs above each candy, lets player fall for collection, then waits delay before next.
+-- Syncs collected from replicatessomedata event; ignores specified paths.
+-- Place in executor; works in-game.
+-- Note: Fan-made; use responsibly, may lag or trigger anti-cheat.
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local autoTweenEnabled = false
+local fullWorkspaceScan = false  -- Toggle for scanning entire workspace
+local tweenDelay = 1  -- Default delay between tweens in seconds
+local tweenConnection = nil
+local collected = {}  -- Synced from rewards event
+
+local rewardsEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("replicatessomedata")
+
+local Window = Rayfield:CreateWindow({
+   Name = "MMT Auto Tween Hub",
+   LoadingTitle = "Loading Candy Tools",
+   LoadingSubtitle = "Mega Mansion Tycoon",
+   ConfigurationSaving = {Enabled = true, FolderName = nil, FileName = "MMTHub"},
+   KeySystem = false
+})
+
+-- Hook rewards event to update collected
+rewardsEvent.OnClientEvent:Connect(function(data)
+   if data then
+      for id, val in pairs(data) do
+         if val == true and id:match("^%d+$") then
+            collected[id] = true
+         end
+      end
+      print("Updated collected candies from server!")
+   end
+end)
+
+-- Function to tween to candy (10 studs above, fall for collection)
+local function tweenToCandy(candy)
+   local character = player.Character
+   if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+   local rootPart = character.HumanoidRootPart
+   local targetCFrame = candy.CFrame + Vector3.new(0, 10, 0)  -- Tween to 10 studs above
+   
+   local tweenInfo = TweenInfo.new(1, Enum.EasingStyle.Linear)  -- 1s smooth tween
+   local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
+   tween:Play()
+   tween.Completed:Wait()  -- Wait for tween to finish before delay
+end
+
+-- Function to check if object should be ignored
+local function isIgnored(obj)
+   local ignorePart = workspace:FindFirstChild("Zednov's Tycoon Kit")
+   if ignorePart then
+      ignorePart = ignorePart:FindFirstChild("Tycoons")
+      if ignorePart then
+         ignorePart = ignorePart:FindFirstChild("Blue")
+         if ignorePart then
+            ignorePart = ignorePart:FindFirstChild("PurchasedObjects")
+            if ignorePart then
+               ignorePart = ignorePart:FindFirstChild("Level1")
+               if ignorePart then
+                  ignorePart = ignorePart:FindFirstChild("Floor1")
+                  if ignorePart then
+                     ignorePart = ignorePart:FindFirstChild("Part")
+                     if ignorePart then
+                        local children = ignorePart:GetChildren()
+                        -- Ignore children[3] and [4] if they exist
+                        if #children >= 4 and (obj == children[3] or obj == children[4]) then
+                           return true
+                        end
+                     end
+                  end
+               end
+            end
+         end
+      end
+   end
+   return false
+end
+
+-- Scan function (folder or full workspace)
+local function scanCandies()
+   local candies = {}
+   if fullWorkspaceScan then
+      -- Full workspace scan for any Part/BasePart with numeric name or "Candy*"
+      for _, obj in pairs(workspace:GetDescendants()) do
+         if (obj:IsA("BasePart") or obj:IsA("Part")) and (obj.Name:match("^%d+$") or obj.Name:match("^Candy")) and not collected[obj.Name] and not isIgnored(obj) then
+            table.insert(candies, obj)
+         end
+      end
+   else
+      -- Primary: Scan workspace.Candies for numbered children (e.g., "1", "2")
+      local candiesFolder = workspace:FindFirstChild("Candies")
+      if candiesFolder then
+         for _, obj in pairs(candiesFolder:GetChildren()) do
+            if obj.Name:match("^%d+$") and not collected[obj.Name] and not isIgnored(obj) then
+               table.insert(candies, obj)
+            end
+         end
+      end
+   end
+   return candies
+end
+
+-- Auto Tween Loop
+local function startAutoTween()
+   tweenConnection = RunService.Heartbeat:Connect(function()
+      if not autoTweenEnabled then return end
+      local character = player.Character
+      if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+      
+      -- Get current uncollected candies
+      local currentCandies = scanCandies()
+      
+      if #currentCandies > 0 then
+         local nextCandy = currentCandies[1]
+         tweenToCandy(nextCandy)
+         print("Tweened above " .. nextCandy.Name .. " (" .. nextCandy:GetFullName() .. ")")
+         task.wait(tweenDelay)  -- Wait after fall for collection before next tween
+      else
+         print("All collected! Waiting for respawn...")
+         task.wait(5)  -- Respawn delay
+      end
+   end)
+end
+
+-- Toggle Auto Tween
+local function toggleAutoTween(value)
+   autoTweenEnabled = value
+   if value then
+      startAutoTween()
+      print("Auto Tween Enabled! Delay: " .. tweenDelay .. "s")
+   else
+      if tweenConnection then
+         tweenConnection:Disconnect()
+         tweenConnection = nil
+      end
+      print("Auto Tween Disabled!")
+   end
+end
+
+-- Toggle Full Workspace Scan
+local function toggleFullScan(value)
+   fullWorkspaceScan = value
+   if autoTweenEnabled then
+      print(value and "Switched to Full Workspace" or "Switched to Candies Folder")
+   end
+end
+
+-- Update Tween Delay
+local function updateDelay(value)
+   tweenDelay = value
+   if autoTweenEnabled then
+      print("Delay Updated to " .. value .. "s")
+   end
+end
+
+-- UI Setup
+local FarmTab = Window:CreateTab("Farming", nil)
+
+FarmTab:CreateToggle({
+   Name = "Auto Tween to Candies (Fall Collect)",
+   CurrentValue = false,
+   Flag = "AutoTween",
+   Callback = toggleAutoTween,
+})
+
+FarmTab:CreateToggle({
+   Name = "Full Workspace Scan (Loose Candies)",
+   CurrentValue = false,
+   Flag = "FullScan",
+   Callback = toggleFullScan,
+})
+
+FarmTab:CreateSlider({
+   Name = "Tween Delay (After Fall)",
+   Range = {0.5, 5},
+   Increment = 0.5,
+   Suffix = "s",
+   CurrentValue = 1,
+   Flag = "DelaySlider",
+   Callback = updateDelay,
+})
+
+FarmTab:CreateButton({
+   Name = "Scan & Tween to Nearest (Manual)",
+   Callback = function()
+      local candies = scanCandies()
+      if #candies == 0 then
+         print("No uncollected candies found!")
+         return
+      end
+      
+      local nearest, nearestDist = nil, math.huge
+      local myPos = player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character.HumanoidRootPart.Position
+      if not myPos then return end
+      
+      for _, candy in pairs(candies) do
+         local dist = (myPos - candy.Position).Magnitude
+         if dist < nearestDist then
+            nearest, nearestDist = candy, dist
+         end
+      end
+      
+      if nearest then
+         tweenToCandy(nearest)
+         print("Tweened above nearest: " .. nearest.Name .. " (" .. nearestDist .. " studs)")
+      end
+   end,
+})
+
+FarmTab:CreateLabel("Tweens smoothly 10 studs above numbered candies (e.g., '1', '2') for fall collection. Syncs collected from replicatessomedata event. Ignores specified paths.")
+
+-- Handle respawn
+player.CharacterAdded:Connect(function()
+   task.wait(1)
+end)
+
+print("MMT Auto Tween Candies Hub loaded!")
